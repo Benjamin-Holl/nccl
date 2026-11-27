@@ -26,6 +26,7 @@ enum ncclTaskKind {
 // Collective API inputs captured at enqueue time.
 struct ncclRawTaskColl {
   ncclFunc_t func;
+  uint64_t collectiveId;
   void const* sendbuff;
   void* recvbuff;
   size_t count;
@@ -46,6 +47,7 @@ struct ncclRawTaskAllGatherV {
   void const* sendbuff;
   void** recvbuff;
   size_t* counts;
+  uint64_t* collectiveIds; // Original Broadcast IDs, indexed by root (counts[root] != 0).
   size_t maxCount;
   ncclDataType_t datatype;
   cudaStream_t stream;
@@ -55,6 +57,7 @@ struct ncclRawTaskAllGatherV {
 struct ncclRawTaskSendRecv {
   ncclFunc_t func;
   ncclFunc_t collAPI;
+  uint64_t collectiveId; // Parent collective ID when collAPI differs from func.
   void* buff;
   size_t count;
   ncclDataType_t datatype;

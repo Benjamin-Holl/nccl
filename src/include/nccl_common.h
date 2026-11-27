@@ -8,7 +8,7 @@
 #ifndef NCCL_DEBUG_H_
 #define NCCL_DEBUG_H_
 
-#ifdef NCCL_OS_LINUX
+#if defined(NCCL_OS_LINUX) && defined(__cplusplus)
   // Workaround for libstdc++ trying to force public visibility of std:: symbols.  We don't want to do that in
   // libnccl.so.
 #include <bits/c++config.h>
@@ -16,7 +16,7 @@
 #define _GLIBCXX_VISIBILITY(V)
 #endif
 
-#include <cstdint>
+#include <stdint.h>
 
 // Windows compatibility: define ssize_t if not available
 #ifdef NCCL_OS_WINDOWS

@@ -53,6 +53,9 @@ struct ncclTuningResult_t {
 
 struct ncclTuningInput_t {
   struct ncclComm* comm;
+  // Borrowed until the synchronous tuning call (including fallbacks) returns.
+  const uint64_t* collectiveIds;
+  size_t nCollectiveIds;
   uint64_t tuningMask;
   ncclFunc_t func;
   ncclRedOp_t redOp;

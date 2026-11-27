@@ -36,6 +36,8 @@ static ncclResult_t fillCollTuningInput(struct ncclComm* comm, struct ncclRawTas
   // disable ce temporarily
   in->tuningMask = NCCL_TUNING_MASK_SYM_KERNELS | NCCL_TUNING_MASK_GENERAL_KERNELS;
   in->func = raw->func;
+  in->collectiveIds = &raw->collectiveId;
+  in->nCollectiveIds = 1;
   in->redOp = raw->opHost;
   in->devRedOp = raw->opDev.op;
   in->datatype = raw->datatype;
@@ -148,6 +150,7 @@ static ncclResult_t preTuningInitAllGatherVRaw(struct ncclComm* comm, struct ncc
   agv->sendbuff = nullptr;
   agv->recvbuff = ncclMemoryStackAlloc<void*>(&comm->memScoped, nRanks);
   agv->counts = ncclMemoryStackAlloc<size_t>(&comm->memScoped, nRanks);
+  agv->collectiveIds = ncclMemoryStackAlloc<uint64_t>(&comm->memScoped, nRanks);
   agv->maxCount = 0;
   agv->datatype = ncclInt8;
   agv->stream = (cudaStream_t)-1; // invalid stream
@@ -167,6 +170,7 @@ static ncclResult_t preTuningAddBcastToAllGatherV(struct ncclComm* comm, struct 
   agv->recvbuff[bcast->root] = bcast->recvbuff;
   size_t count = bcast->count * ncclTypeSize(bcast->datatype);
   agv->counts[bcast->root] = count;
+  agv->collectiveIds[bcast->root] = bcast->collectiveId;
   if (count > agv->maxCount) agv->maxCount = count;
   return ncclSuccess;
 }

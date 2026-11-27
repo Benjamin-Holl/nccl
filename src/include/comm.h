@@ -199,6 +199,7 @@ struct ncclCollnetHandleList {
 struct ncclTaskColl {
   struct ncclTaskColl* next;
   ncclFunc_t func;
+  uint64_t collectiveId; // Enqueue-time ID in the communicator-wide sequence.
   void const* sendbuff;
   void* recvbuff;
   size_t count;
@@ -261,6 +262,7 @@ struct ncclTaskColl {
 struct ncclTaskBcast {
   struct ncclTaskBcast* next;
   ncclFunc_t func;
+  uint64_t collectiveId; // Enqueue-time ID in the communicator-wide sequence.
   void* recvbuff;
   const void* sendbuff;
   size_t count;
@@ -284,6 +286,7 @@ struct ncclTaskP2p {
   struct ncclTaskP2p* next;
   ncclFunc_t func;
   ncclFunc_t collAPI;
+  uint64_t collectiveId; // Parent collective ID when collAPI differs from func.
   void* buff;
   size_t count;
   ncclDataType_t datatype;
@@ -798,6 +801,11 @@ struct ncclComm {
   int tunerPluginLoaded;
   ncclTuner_t* tuner;
   void* tunerContext;
+
+  // One enqueue counter for all collective types, zeroed by communicator allocation.
+  // Separate from the execution/plan counters used by RAS.
+  // Like planner queues, protected by NCCL's single-thread-per-communicator enqueue contract.
+  uint64_t nextCollectiveId;
 
   // Profiler plugin
   void* profilerContext;

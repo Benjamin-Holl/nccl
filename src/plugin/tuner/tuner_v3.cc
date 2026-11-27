@@ -16,19 +16,22 @@ static ncclTuner_t ncclTuner;
 
 static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, size_t nBytes, int numPipeOps,
                                           float** collCostTable, int numAlgo, int numProto,
-                                          int regBuff __attribute__((unused)), int* nChannels) {
+                                          int regBuff __attribute__((unused)), int* nChannels,
+                                          const uint64_t* /*collectiveIds*/, size_t /*nCollectiveIds*/,
+                                          int /*rank*/) {
   NCCLCHECK(ncclTuner_v3->getCollInfo(context, collType, nBytes, numPipeOps, collCostTable, numAlgo, numProto,
                                       nChannels));
   return ncclSuccess;
 }
 
-static ncclResult_t ncclTuner_finalize(void* ctx) {
+static ncclResult_t ncclTuner_finalize(void* ctx, int /*rank*/) {
   return ncclTuner_v3->destroy(ctx);
 }
 
 static ncclResult_t ncclTuner_init(void** context, uint64_t commId, size_t nRanks, size_t nNodes,
                                    ncclDebugLogger_t logfn, ncclNvlDomainInfo_v5_t* nvlDomainInfo,
-                                   ncclTunerConstants_t* /*constants*/) {
+                                   ncclTunerConstants_t* /*constants*/,
+                                   int64_t /*busId*/, int /*nvmlId*/, int /*rank*/) {
   NCCLCHECK(ncclTuner_v3->init(nRanks, nNodes, logfn, context));
   ncclTuner.getCollInfo = ncclTuner_getCollInfo;
   ncclTuner.getChunkSize = NULL;

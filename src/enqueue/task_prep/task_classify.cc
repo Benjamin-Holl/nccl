@@ -35,11 +35,12 @@ static ncclResult_t classifyFillSendRecvTuningInput(struct ncclComm* comm, struc
 static ncclResult_t classifyEnqueueP2pTask(
   struct ncclComm* comm, struct ncclIntruQueue<struct ncclTaskTuningInfo, &ncclTaskTuningInfo::next>* p2pTaskQueue,
   ncclFunc_t func, ncclFunc_t collAPI, void* buff, size_t count, ncclDataType_t datatype, int peer,
-  cudaStream_t stream) {
+  cudaStream_t stream, uint64_t collectiveId) {
   struct ncclRawTask* raw = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
   raw->kind = ncclTaskKindSendRecv;
   raw->sendRecv.func = func;
   raw->sendRecv.collAPI = collAPI;
+  raw->sendRecv.collectiveId = collectiveId;
   raw->sendRecv.buff = buff;
   raw->sendRecv.count = count;
   raw->sendRecv.datatype = datatype;
@@ -68,19 +69,19 @@ static ncclResult_t classifyCollToP2pTasks(
       void* sendBuff = (void*)((char*)coll->sendbuff + r * coll->count * elemSize);
       void* recvBuff = (void*)((char*)coll->recvbuff + r * coll->count * elemSize);
       NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, sendBuff, coll->count, coll->datatype,
-                                       r, stream));
+                                       r, stream, coll->collectiveId));
       NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, recvBuff, coll->count, coll->datatype,
-                                       r, stream));
+                                       r, stream, coll->collectiveId));
     }
   } else if (coll->func == ncclFuncGather) {
     NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, (void*)coll->sendbuff, coll->count,
-                                     coll->datatype, coll->root, stream));
+                                     coll->datatype, coll->root, stream, coll->collectiveId));
     if (comm->rank == coll->root) {
       size_t offset = 0;
       for (int r = 0; r < comm->nRanks; r++) {
         void* buff = (void*)((char*)coll->recvbuff + offset);
         NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, buff, coll->count, coll->datatype,
-                                         r, stream));
+                                         r, stream, coll->collectiveId));
         offset += coll->count * elemSize;
       }
     }
@@ -90,12 +91,12 @@ static ncclResult_t classifyCollToP2pTasks(
       for (int r = 0; r < comm->nRanks; r++) {
         void* buff = (void*)((char*)coll->sendbuff + offset);
         NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncSend, collAPI, buff, coll->count, coll->datatype,
-                                         r, stream));
+                                         r, stream, coll->collectiveId));
         offset += coll->count * elemSize;
       }
     }
     NCCLCHECK(classifyEnqueueP2pTask(comm, p2pTaskQueue, ncclFuncRecv, collAPI, coll->recvbuff, coll->count,
-                                     coll->datatype, coll->root, stream));
+                                     coll->datatype, coll->root, stream, coll->collectiveId));
   } else {
     return ncclInternalError;
   }

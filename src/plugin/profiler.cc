@@ -587,7 +587,9 @@ ncclResult_t ncclProfilerStartTaskEvents(struct ncclKernelPlan* plan) {
         eDescr.coll.parentGroup = plan->groupEventHandle;
         eDescr.parentObj = ct->collApiEventHandle;
         eDescr.rank = plan->comm->rank;
-        eDescr.coll.seqNumber = plan->comm->seqNumber[ct->func];
+        // Inspector coll_sn is the enqueue-time logical ID, not plan/execution order.
+        // Graph replays reuse it. Keep the separate RAS update below unchanged.
+        eDescr.coll.seqNumber = ct->collectiveId;
         eDescr.coll.func = ncclFuncToString(ct->func);
         eDescr.coll.sendBuff = ct->sendbuff;
         eDescr.coll.recvBuff = ct->recvbuff;
@@ -1405,7 +1407,8 @@ ncclResult_t ncclProfilerStartCeCollEvent(struct ncclComm* comm, struct ncclCeCo
       eDescr.parentObj = args->collApiEventHandle;
       eDescr.rank = comm->rank;
 
-      eDescr.ceColl.seqNumber = comm->ceColl.ceSeqNum;
+      // Keep ceSeqNum below as the independent CE synchronization counter.
+      eDescr.ceColl.seqNumber = args->collectiveId;
       eDescr.ceColl.func = ncclFuncToString(args->func);
       eDescr.ceColl.sendBuff = args->sendBuff;
       eDescr.ceColl.recvBuff = args->recvBuff;

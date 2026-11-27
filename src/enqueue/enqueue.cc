@@ -423,6 +423,10 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
       struct ncclTaskColl* t =
         ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
       t->func = ncclFuncBroadcast;
+      t->collectiveId = bcastTask->collectiveId;
+      t->eActivationMask = bcastTask->eActivationMask;
+      t->groupApiEventHandle = bcastTask->groupApiEventHandle;
+      t->collApiEventHandle = bcastTask->collApiEventHandle;
       t->sendbuff = bcastTask->sendbuff;
       t->recvbuff = bcastTask->recvbuff;
       t->count = bcastTask->count;
@@ -478,6 +482,9 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
   // Walk (fn,op,ty) bins, compute algo and proto etc. Then bin them by their
   // scheduling constraints (collnet x nvls).
   struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next> collBins[2][2] = {};
+  uint64_t* collectiveIds = nullptr;
+  if (comm->tuner && planner->nTasksColl)
+    collectiveIds = ncclMemoryStackAlloc<uint64_t>(&comm->memScoped, planner->nTasksColl);
   for (int cursor = 0; cursor < fnOpTyCount; cursor++) {
     struct ncclTaskColl* aggBeg = tasksByFnOpTy[fnOpTyIndices[cursor]];
     int collNetSupport = 0;
@@ -499,7 +506,14 @@ ncclResult_t ncclPrepareTasks(struct ncclComm* comm, bool* algoNeedConnect, bool
         aggEnd = aggEnd->next;
       }
 
-      NCCLCHECK(ncclGetAlgoInfo(comm, &agg, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo));
+      size_t nCollectiveIds = 0;
+      // Read the original tasks before the binning below rewires their links.
+      if (collectiveIds) {
+        for (struct ncclTaskColl* t = aggBeg; t != aggEnd; t = t->next)
+          collectiveIds[nCollectiveIds++] = t->collectiveId;
+      }
+      NCCLCHECK(ncclGetAlgoInfo(comm, &agg, collNetSupport, nvlsSupport, nTasksPerChannel, simInfo,
+                                 collectiveIds, nCollectiveIds));
       agg.devFuncId = ncclDevFuncId(agg.func, agg.opDev.op, agg.datatype, agg.algorithm, agg.protocol);
 
       int isCollnet = 0, isNvls = 0;
@@ -2095,14 +2109,16 @@ ncclResult_t ncclGetRegBuff(struct ncclComm* comm, struct ncclTaskColl* info, in
 // Then, topoGetAlgoInfo will set algo/proto if not set, then nChannels and nThreads based on algo/proto.
 // Finally, nChannels will be overriden by the plugin setting.
 ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* info, int collNetSupport, int nvlsSupport,
-                             int numPipeOps, ncclSimInfo_t* simInfo /* = NULL*/
-) {
+                             int numPipeOps, ncclSimInfo_t* simInfo,
+                             const uint64_t* collectiveIds, size_t nCollectiveIds) {
   size_t elementSize = ncclTypeSize(info->datatype);
   size_t nBytes = elementSize * ncclFuncMaxSendRecvCount(info->func, comm->nRanks, info->count);
   info->algorithm = NCCL_ALGO_UNDEF;
   info->protocol = NCCL_PROTO_UNDEF;
-  struct ncclTuningInput_t input;
+  struct ncclTuningInput_t input = {};
   input.comm = comm;
+  input.collectiveIds = collectiveIds;
+  input.nCollectiveIds = nCollectiveIds;
   input.tuningMask = NCCL_TUNING_MASK_GENERAL_KERNELS;
   // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
   // algSelection for any function it forced.
@@ -2604,7 +2620,8 @@ ncclResult_t ncclPlannerSetCapturingGraph(struct ncclComm* comm, struct ncclInfo
 }
 
 static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, ncclFunc_t coll, ncclFunc_t collAPI,
-                                  void* buff, size_t count, ncclDataType_t datatype, int peer, bool allowUB) {
+                                  void* buff, size_t count, ncclDataType_t datatype, int peer, bool allowUB,
+                                  uint64_t collectiveId = 0) {
   struct ncclKernelPlanner* planner = &comm->planner;
 
   // Determine peer and basic parameters.
@@ -2625,6 +2642,7 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
   struct ncclTaskP2p* p2p = ncclMemoryPoolAlloc<struct ncclTaskP2p>(&comm->memPool_ncclTaskP2p, &comm->memPermanent);
   p2p->func = coll;
   p2p->collAPI = collAPI;
+  p2p->collectiveId = collectiveId;
   p2p->buff = buff;
   p2p->count = count;
   p2p->datatype = datatype;
@@ -2730,6 +2748,11 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
       planner->bcast_info.BcastPeers += 1;
     }
 
+    t->collectiveId = comm->nextCollectiveId++;
+    t->eActivationMask = ncclProfilerApiState.eActivationMask;
+    t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
+    t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
+
     // enqueue to peer's bcast queue instead of collSorter
     ncclIntruQueueEnqueue(&planner->peers[info->root].bcastQueue, t);
     planner->nTasksBcast += 1;
@@ -2779,6 +2802,7 @@ static ncclResult_t collTaskAppend(struct ncclComm* comm, struct ncclInfo* info,
     t->groupApiEventHandle = ncclProfilerApiState.groupApiEventHandle;
     t->collApiEventHandle = ncclProfilerApiState.collApiEventHandle;
 
+    t->collectiveId = comm->nextCollectiveId++;
     planner->nTasksColl += 1;
     ncclTaskCollSorterInsert(&planner->collSorter, t, t->trafficBytes);
   }
@@ -2873,6 +2897,7 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
   t->sendWin = sendWin;
   t->recvWin = recvWin;
 
+  t->collectiveId = comm->nextCollectiveId++;
   ncclIntruQueueEnqueue(&planner->collCeTaskQueue, t);
   ncclProfilerStopCollApiEvent();
 
@@ -3123,6 +3148,7 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     t->kind = ncclTaskKindSendRecv;
     t->sendRecv.func = info->coll;
     t->sendRecv.collAPI = info->coll;
+    t->sendRecv.collectiveId = 0;
     t->sendRecv.buff = info->recvbuff;
     t->sendRecv.count = info->count;
     t->sendRecv.datatype = info->datatype;
@@ -3215,6 +3241,8 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
       NCCLCHECK(ncclLaunchOneRank(info->recvbuff, info->sendbuff, info->count, opDev, info->datatype, info->stream));
       return ncclSuccess;
     }
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeRawTask);
+    NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
     t = ncclMemoryPoolAlloc<struct ncclRawTask>(&comm->memPool_ncclRawTask, &comm->memPermanent);
     t->kind = ncclTaskKindColl;
     t->coll.func = info->coll;
@@ -3227,15 +3255,16 @@ static ncclResult_t rawTaskAppend(struct ncclComm* comm, struct ncclInfo* info) 
     t->coll.opDev = opDev;
     t->coll.stream = info->stream;
     t->coll.collConfig = info->collConfig;
+    t->coll.collectiveId = comm->nextCollectiveId++;
     if (info->coll == ncclFuncBroadcast) {
       ncclIntruQueueEnqueue(&rtq->bcastQueue, t);
     } else {
       ncclIntruQueueEnqueue(&rtq->genericQueue, t);
     }
+    return ncclSuccess;
   }
 
   ncclGroupCommJoin(comm, ncclGroupTaskTypeRawTask);
-
   NCCLCHECK(ncclPlannerSetCapturingGraph(comm, info));
 
   return ncclSuccess;
@@ -3318,6 +3347,9 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         // For cuda graph checking
         NCCLCHECK(ncclCudaGetCapturingGraph(&graph, info->stream, comm->config.graphUsageMode));
         captured = ncclCudaGraphValid(graph);
+        // A collective lowered to P2P shares one ID across its generated tasks.
+        // Advance the counter only after all legs are accepted.
+        uint64_t collectiveId = comm->nextCollectiveId;
         if (info->coll == ncclFuncAlltoAll) {
           bool sendLocalValid = false;
           bool recvLocalValid = false;
@@ -3333,24 +3365,26 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           for (int r = 0; r < comm->nRanks; r++) {
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI,
                                     (void*)((char*)info->sendbuff + r * info->count * ncclTypeSize(info->datatype)),
-                                    info->count, info->datatype, r, allowUB));
+                                    info->count, info->datatype, r, allowUB, collectiveId));
             NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI,
                                     (void*)((char*)info->recvbuff + r * info->count * ncclTypeSize(info->datatype)),
-                                    info->count, info->datatype, r, allowUB));
+                                    info->count, info->datatype, r, allowUB, collectiveId));
           }
+          ++comm->nextCollectiveId;
         } else if (info->coll == ncclFuncGather) {
           size_t offset = 0;
           allowUB = captured;
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, (void*)info->sendbuff, info->count, info->datatype,
-                                  info->root, allowUB));
+                                  info->root, allowUB, collectiveId));
           if (comm->rank == info->root) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->recvbuff + offset);
               NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, buff, info->count, info->datatype, r,
-                                      allowUB));
+                                      allowUB, collectiveId));
               offset += info->count * ncclTypeSize(info->datatype);
             }
           }
+          ++comm->nextCollectiveId;
         } else if (info->coll == ncclFuncScatter) {
           size_t offset = 0;
           allowUB = captured;
@@ -3358,12 +3392,13 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
             for (int r = 0; r < comm->nRanks; r++) {
               void* buff = (void*)((char*)info->sendbuff + offset);
               NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncSend, collAPI, buff, info->count, info->datatype, r,
-                                      allowUB));
+                                      allowUB, collectiveId));
               offset += info->count * ncclTypeSize(info->datatype);
             }
           }
           NCCLCHECK(p2pTaskAppend(comm, info, ncclFuncRecv, collAPI, (void*)info->recvbuff, info->count, info->datatype,
-                                  info->root, allowUB));
+                                  info->root, allowUB, collectiveId));
+          ++comm->nextCollectiveId;
         } else if (!ncclCollConfigHasAlgSelection(&info->collConfig) && ceAvailable && comm->symmetricSupport &&
                    info->coll == ncclFuncAllGather && info->count > symCeAllGatherThreshold(comm) &&
                    comm->minCompCap >= 100 && comm->isAllDirectNvlink) {

@@ -39,7 +39,8 @@ static int hasCollNetSupport(float** collCostTable) {
 static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, size_t nBytes, int numPipeOps,
                                           float** collCostTable, int numAlgo __attribute__((unused)),
                                           int numProto __attribute__((unused)), int regBuff __attribute__((unused)),
-                                          int* nChannels) {
+                                          int* nChannels, const uint64_t* /*collectiveIds*/, size_t /*nCollectiveIds*/,
+                                          int /*rank*/) {
   int algorithm = NCCL_ALGO_UNDEF;
   int protocol = NCCL_PROTO_UNDEF;
   int nvlsSupport = hasNvlsSupport(collCostTable);
@@ -54,12 +55,13 @@ static ncclResult_t ncclTuner_getCollInfo(void* context, ncclFunc_t collType, si
   return ncclSuccess;
 }
 
-static ncclResult_t ncclTuner_finalize(void* ctx) {
+static ncclResult_t ncclTuner_finalize(void* ctx, int /*rank*/) {
   return ncclTuner_v2->destroy(ctx);
 }
 
 static ncclResult_t ncclTuner_init(void** ctx, uint64_t commId, size_t nRanks, size_t nNodes, ncclDebugLogger_t logfn,
-                                   ncclNvlDomainInfo_v5_t* nvlDomainInfo, ncclTunerConstants_t* /*constants*/) {
+                                   ncclNvlDomainInfo_v5_t* nvlDomainInfo, ncclTunerConstants_t* /*constants*/,
+                                   int64_t /*busId*/, int /*nvmlId*/, int /*rank*/) {
   NCCLCHECK(ncclTuner_v2->init(nRanks, nNodes, logfn, ctx));
   ncclTuner.getCollInfo = ncclTuner_getCollInfo;
   ncclTuner.getChunkSize = NULL;

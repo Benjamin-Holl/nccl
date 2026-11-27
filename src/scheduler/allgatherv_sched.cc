@@ -43,6 +43,9 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
       return ncclSuccess;
     }
 
+    // This is a synthetic AllGather cost-model query, not a logical AllGather.
+    // The tasks retain Broadcast IDs, but this path emits no normal coll events.
+    // Do not mislabel those IDs as AllGather IDs in the external tuner.
     // find best protocol
     struct ncclTaskColl tcoll;
     memset(&tcoll, 0, sizeof(tcoll));
@@ -52,7 +55,7 @@ ncclResult_t ncclScheduleBcastTasksToPlan(struct ncclComm* comm, struct ncclKern
     tcoll.algorithm = NCCL_ALGO_RING;
     tcoll.protocol = NCCL_PROTO_UNDEF;
     NCCLCHECK(ncclGetAlgoInfo(comm, &tcoll, /*collNetSupport=*/0, /*nvlsSupport=*/0, /*nTasksPerChannel=*/1,
-                              /*simInfo=*/nullptr));
+                              /*simInfo=*/nullptr, /*collectiveIds=*/nullptr, /*nCollectiveIds=*/0));
 
     // calculate chunk size
     int proto = tcoll.protocol;

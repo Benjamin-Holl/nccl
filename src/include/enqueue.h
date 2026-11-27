@@ -61,7 +61,8 @@ static inline size_t ncclFuncMaxSendRecvCount(ncclFunc_t func, int nRanks, size_
 
 ncclResult_t ncclGetCollNetSupport(struct ncclComm* comm, struct ncclTaskColl* task, int* collNetSupport);
 ncclResult_t ncclGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* task, int collNetSupport, int nvlsSupport,
-                             int numPipeOps, ncclSimInfo_t* simInfo = NULL);
+                             int numPipeOps, ncclSimInfo_t* simInfo,
+                             const uint64_t* collectiveIds, size_t nCollectiveIds);
 bool ncclTestBudget(struct ncclKernelPlanBudget* budget, int nWorkBatches, ssize_t nWorkBytes);
 
 void ncclAddWorkBatchToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int channelId,

@@ -91,6 +91,8 @@ static ncclResult_t fillCollTaskFromRaw(struct ncclComm* comm, struct ncclTaskTu
 
   memset(task, 0, sizeof(*task));
   task->func = raw->func;
+  task->collectiveId = raw->collectiveId;
+  task->profilerTag = raw->collConfig.userProfilerTag;
   task->sendbuff = raw->sendbuff;
   task->recvbuff = raw->recvbuff;
   task->count = raw->count;
@@ -197,6 +199,7 @@ static ncclResult_t fillP2pTaskFromRaw(struct ncclComm* comm, struct ncclTaskTun
 
   task->func = raw->func;
   task->collAPI = raw->collAPI;
+  task->collectiveId = raw->collectiveId;
   task->buff = raw->buff;
   task->count = raw->count;
   task->datatype = raw->datatype;
@@ -779,6 +782,7 @@ static ncclResult_t postTuneAllGatherVEnqueueBroadcastTask(struct ncclComm* comm
 
   memset(task, 0, sizeof(*task));
   task->func = ncclFuncBroadcast;
+  task->collectiveId = agv->collectiveIds[root];
   task->sendbuff = (root == comm->rank) ? agv->sendbuff : nullptr;
   task->recvbuff = agv->recvbuff[root];
   task->count = agv->counts[root];
@@ -792,7 +796,7 @@ static ncclResult_t postTuneAllGatherVEnqueueBroadcastTask(struct ncclComm* comm
   NCCLCHECK(ncclGetCollNetSupport(comm, task, &collNetSupport));
   nvlsSupport =
     comm->nvlsSupport && (ncclNvlsSupported(task->opDev.op, task->datatype) || task->func == ncclFuncAllGather);
-  NCCLCHECK(ncclGetAlgoInfo(comm, task, collNetSupport, nvlsSupport, 1, nullptr));
+  NCCLCHECK(ncclGetAlgoInfo(comm, task, collNetSupport, nvlsSupport, 1, nullptr, &task->collectiveId, 1));
   task->devFuncId = ncclDevFuncId(task->func, task->opDev.op, task->datatype, task->algorithm, task->protocol);
   switch (task->algorithm) {
   case NCCL_ALGO_NVLS:
@@ -849,6 +853,7 @@ static ncclResult_t postTuneAllGatherVEnqueueBcastTasks(struct ncclComm* comm, s
     struct ncclTaskBcast* t =
       ncclMemoryPoolAlloc<struct ncclTaskBcast>(&comm->memPool_ncclTaskBcast, &comm->memPermanent);
     t->func = ncclFuncAllGatherV;
+    t->collectiveId = agv->collectiveIds[root];
     t->sendbuff = (root == comm->rank) ? agv->sendbuff : nullptr;
     t->recvbuff = agv->recvbuff[root];
     t->count = agv->counts[root];
@@ -937,6 +942,8 @@ static ncclResult_t postTuneCeCollTaskAppend(struct ncclComm* comm, const struct
   struct ncclTaskColl* t = ncclMemoryPoolAlloc<struct ncclTaskColl>(&comm->memPool_ncclTaskColl, &comm->memPermanent);
 
   t->func = raw->func;
+  t->collectiveId = raw->collectiveId;
+  t->profilerTag = raw->collConfig.userProfilerTag;
   t->sendbuff = raw->sendbuff;
   t->recvbuff = raw->recvbuff;
   t->count = raw->count;

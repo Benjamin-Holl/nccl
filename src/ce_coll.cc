@@ -50,7 +50,8 @@ NCCL_PARAM(HierCeCollNumCtx, "HIER_CE_COLL_NUM_CTX", -1);
 
 // Decide multicast vs unicast for CE AllGather: a CE-only tuning mask lets
 // ncclTuningCompute pick the fastest CE method (UC vs MC).
-int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace) {
+int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace,
+                                const uint64_t* collectiveId) {
   if (!comm->symkState.hasLsaMultimem) return 0;
 
   int64_t thresholdOverride = comm->ceColl.agMulticastThreshold;
@@ -60,6 +61,8 @@ int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int 
 
   struct ncclTuningInput_t input = {};
   input.comm = comm;
+  input.collectiveIds = collectiveId;
+  input.nCollectiveIds = 1;
   input.tuningMask = NCCL_TUNING_MASK_CE;
   input.func = ncclFuncAllGather;
   input.datatype = ncclInt8;
@@ -570,7 +573,7 @@ ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args,
   // declare-then-assign: NCCLCHECKGOTO's goto can't cross a scalar initialization.
   bool agUseMulticast;
   agUseMulticast = ncclCeAllGatherUseMulticast(comm, chunkBytes, ncclCudaGraphValid(comm->planner.capturingGraph),
-                                               mySendBuff == myRecvBuff);
+                                               mySendBuff == myRecvBuff, &args->collectiveId);
 
   if (agUseMulticast) {
     // Multicast path: a single write to the multicast pointer covers
@@ -1248,7 +1251,8 @@ ncclResult_t ncclHierCeAllGather(struct ncclComm* comm, struct ncclKernelPlan* p
   bool agUseMulticast;
   agUseMulticast =
     ncclCeAllGatherUseMulticast(comm, perRankBytes, ncclCudaGraphValid(comm->planner.capturingGraph),
-                                (const uint8_t*)sendbuff == (const uint8_t*)recvbuff + myRank * perRankBytes);
+                                (const uint8_t*)sendbuff == (const uint8_t*)recvbuff + myRank * perRankBytes,
+                                &args->collectiveId);
 
   // ====================================================================
   // Phase 4: Self-broadcast (intra-node CE Broadcast of own chunk)
@@ -1724,6 +1728,7 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
   plan->ceCollArgs->recvWin = task->recvWin;
   plan->ceCollArgs->collApiEventHandle = task->collApiEventHandle;
   plan->ceCollArgs->userTag = task->profilerTag;
+  plan->ceCollArgs->collectiveId = task->collectiveId;
 
   if (comm->rank == 0) {
     if (!ncclDevrIsOneLsaTeam(comm)) {

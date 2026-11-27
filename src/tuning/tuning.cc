@@ -47,7 +47,8 @@ ncclResult_t ncclTuningInit(struct ncclComm* comm) {
   NCCLCHECKGOTO(ncclTunerPluginLoad(comm), ret, fail);
   if (comm->tuner) {
     NCCLCHECKGOTO(comm->tuner->init(&comm->tunerContext, comm->commHash, comm->nRanks, comm->nNodes, ncclDebugLog,
-                                    &comm->nvlDomainInfo, &comm->tuningContext.tuningConstants),
+                                    &comm->nvlDomainInfo, &comm->tuningContext.tuningConstants, comm->busId,
+                                    comm->nvmlDev, comm->rank),
                   ret, fail);
   }
 
@@ -111,7 +112,7 @@ ncclResult_t ncclTuningFinalize(struct ncclComm* comm) {
   ncclResult_t ret = ncclSuccess;
   NCCLCHECKGOTO(ncclTuningCostModelFinalize(comm), ret, fail);
   if (comm->tuner != NULL) {
-    NCCLCHECKGOTO(comm->tuner->finalize(comm->tunerContext), ret, fail);
+    NCCLCHECKGOTO(comm->tuner->finalize(comm->tunerContext, comm->rank), ret, fail);
     NCCLCHECKGOTO(ncclTunerPluginUnload(comm), ret, fail);
   }
 exit:
@@ -212,7 +213,8 @@ ncclResult_t ncclTuningCompute(struct ncclTuningInput_t* const input, struct ncc
       int nMaxChannels = 0;
       NCCLCHECKGOTO(input->comm->tuner->getCollInfo(input->comm->tunerContext, input->func, input->nBytes,
                                                     input->numPipeOps, (float**)generalTable, NCCL_NUM_ALGORITHMS,
-                                                    NCCL_NUM_PROTOCOLS, input->regBuff, &nMaxChannels),
+                                                    NCCL_NUM_PROTOCOLS, input->regBuff, &nMaxChannels,
+                                                    input->collectiveIds, input->nCollectiveIds, input->comm->rank),
                     ret, exit);
       while (node != nullptr) {
         struct ncclTuningResult_t& tuning = node->result;

@@ -168,7 +168,14 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         }
         task = task->next;
       }
-      struct ncclTuningInput_t input;
+      struct ncclTuningInput_t input = {};
+      if (comm->tuner) {
+        uint64_t* ids = ncclMemoryStackAlloc<uint64_t>(&comm->memScoped, nWorks);
+        struct ncclTaskColl* member = headTask;
+        for (int i = 0; i < nWorks; i++, member = member->next) ids[i] = member->collectiveId;
+        input.collectiveIds = ids;
+        input.nCollectiveIds = nWorks;
+      }
       input.comm = comm;
       input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
       // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call

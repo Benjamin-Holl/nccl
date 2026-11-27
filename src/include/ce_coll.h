@@ -44,6 +44,7 @@ struct ncclCeInitTask {
 
 struct alignas(16) ncclCeCollArgs {
   ncclFunc_t func;
+  uint64_t collectiveId;
   int rootRank;
   ncclDataType_t datatype;
   size_t nElts;
@@ -97,7 +98,8 @@ ncclResult_t scheduleCeCollTaskToPlan(struct ncclComm* comm, struct ncclKernelPl
 
 ncclResult_t ncclCeAllGather(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
-int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace);
+int ncclCeAllGatherUseMulticast(struct ncclComm* comm, size_t perRankBytes, int captured, int inPlace,
+                                const uint64_t* collectiveId);
 
 ncclResult_t ncclCeScatter(struct ncclComm* comm, struct ncclCeCollArgs* args, cudaStream_t stream);
 
